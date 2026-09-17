@@ -1,0 +1,1 @@
+ALTER TABLE public.matches ADD COLUMN IF NOT EXISTS shootout1 integer, ADD COLUMN IF NOT EXISTS shootout2 integer;

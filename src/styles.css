@@ -1,0 +1,200 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* B LiveStats chrome */
+  --color-topbar: var(--topbar);
+  --color-topbar-foreground: var(--topbar-foreground);
+  --color-tabbar: var(--tabbar);
+  --color-tab-active: var(--tab-active);
+  --color-tab-current: var(--tab-current);
+  --color-tab-done: var(--tab-done);
+  --color-accent-orange: var(--accent-orange);
+  --color-accent-red: var(--accent-red);
+  --color-court-green: var(--court-green);
+
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-panel-border: var(--panel-border);
+  --color-brand-green: var(--brand-green);
+  --color-brand-red: var(--brand-red);
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.18 0.02 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.02 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.02 250);
+  --primary: oklch(0.58 0.18 145);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.96 0.008 160);
+  --secondary-foreground: oklch(0.2 0.02 250);
+  --muted: oklch(0.95 0.008 160);
+  --muted-foreground: oklch(0.5 0.02 250);
+  --accent: oklch(0.94 0.02 145);
+  --accent-foreground: oklch(0.2 0.02 250);
+  --destructive: oklch(0.55 0.22 27);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.88 0.01 160);
+  --input: oklch(0.88 0.01 160);
+  --ring: oklch(0.58 0.18 145);
+
+  /* B LiveStats brand: green #00a040 + red #e00000 */
+  --topbar: oklch(0.22 0.04 160);
+  --topbar-foreground: oklch(0.98 0 0);
+  --tabbar: oklch(0.94 0.012 160);
+  --tab-active: oklch(0.58 0.18 145);
+  --tab-current: oklch(0.55 0.22 27);
+  --tab-done: oklch(0.58 0.18 145);
+  --accent-orange: oklch(0.58 0.18 145); /* brand green (kept token name) */
+  --accent-red: oklch(0.55 0.22 27);
+  --court-green: oklch(0.58 0.18 145);
+
+  /* Professional surface system */
+  --surface: oklch(0.965 0.012 160);
+  --panel: oklch(1 0 0);
+  --panel-border: oklch(0.9 0.012 160);
+  --brand-green: #00a040;
+  --brand-red: #e00000;
+  --gradient-brand: linear-gradient(90deg, #00a040 0%, #007a30 100%);
+  --gradient-header: linear-gradient(180deg, oklch(0.98 0.01 160) 0%, oklch(0.94 0.015 160) 100%);
+  --shadow-panel: 0 1px 2px rgba(15, 40, 25, 0.04), 0 8px 28px -14px rgba(15, 40, 25, 0.18);
+  --shadow-elevated: 0 2px 4px rgba(15, 40, 25, 0.06), 0 18px 40px -16px rgba(15, 40, 25, 0.22);
+}
+
+.dark {
+  --background: oklch(0.15 0.02 260);
+  --foreground: oklch(0.98 0 0);
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-foreground);
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer components {
+  .bls-panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    box-shadow: var(--shadow-panel);
+    border-radius: calc(var(--radius) + 2px);
+  }
+  .bls-panel-header {
+    background: var(--gradient-header);
+    border-bottom: 1px solid var(--panel-border);
+    padding: 0.875rem 1.25rem;
+    border-top-left-radius: calc(var(--radius) + 2px);
+    border-top-right-radius: calc(var(--radius) + 2px);
+    position: relative;
+  }
+  .bls-panel-header::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 4px;
+    background: var(--gradient-brand);
+    border-top-left-radius: calc(var(--radius) + 2px);
+    border-bottom-left-radius: 0;
+  }
+  .bls-input {
+    width: 100%;
+    height: 2.375rem;
+    border: 2px solid oklch(0.2 0 0);
+    background: oklch(0.99 0.005 160);
+    padding: 0 0.625rem;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #000;
+    border-radius: var(--radius);
+    transition: border-color 120ms, box-shadow 120ms, background 120ms;
+  }
+  .bls-input:hover { background: #fff; }
+  .bls-input:focus {
+    outline: none;
+    background: #fff;
+    border-color: var(--brand-green);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand-green) 18%, transparent);
+  }
+  .bls-section-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--brand-green);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .bls-section-title::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--panel-border), transparent);
+  }
+  .handball-court-bg {
+    background-image:
+      linear-gradient(to bottom, color-mix(in oklab, var(--panel) 80%, transparent) 0%, color-mix(in oklab, var(--panel) 80%, transparent) 100%),
+      url('/basketball-arena-bg.png');
+    background-size: cover, cover;
+    background-position: center, center;
+  }
+}
+
+@media print {
+  html, body, * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+  img, svg, canvas {
+    max-width: 100% !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  /* Force scrollable containers to render their full content when printing */
+  .overflow-x-auto,
+  [class*="overflow-x"],
+  [class*="overflow-y"],
+  [class*="overflow-"] {
+    overflow: visible !important;
+  }
+  table {
+    width: 100% !important;
+    table-layout: auto !important;
+  }
+}
+

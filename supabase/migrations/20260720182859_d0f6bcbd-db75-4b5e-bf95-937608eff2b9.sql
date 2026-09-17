@@ -1,0 +1,1 @@
+ALTER TABLE public.tournament_settings ALTER COLUMN points_win SET DEFAULT 1; ALTER TABLE public.tournament_settings ALTER COLUMN points_draw SET DEFAULT 0.5; ALTER TABLE public.tournament_settings ALTER COLUMN points_loss SET DEFAULT 0;

@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Ensure site-config exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path assets/site-config.json)) {
+            '{"sitePassword":"change-me"}' | Set-Content -Encoding utf8 assets/site-config.json
+          }
+          if (-not (Test-Path assets/icon.ico)) {
+            Write-Error "assets/icon.ico is required for the Windows installer"
+          }
+      - run: npm run dist:publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BLIVESTATS_GH_OWNER: ${{ github.repository_owner }}
+          BLIVESTATS_GH_REPO: ${{ github.event.repository.name }}

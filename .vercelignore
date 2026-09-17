@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+.output
+.wrangler
+.nitro
+.tanstack
+_migrate_assets
+.cursor
+agent-transcripts

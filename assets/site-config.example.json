@@ -1,0 +1,8 @@
+{
+  "sitePassword": "change-me",
+  "updates": {
+    "provider": "github",
+    "owner": "YOUR_GITHUB_USERNAME",
+    "repo": "b-livestats-handball"
+  }
+}
