@@ -38,6 +38,7 @@ dist-ssr
 .env*
 release/
 release-out/
+release-publish/
 electron-dist/
 assets/site-config.json
 assets/icon-converted.png

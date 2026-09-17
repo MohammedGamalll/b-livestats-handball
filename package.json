@@ -158,6 +158,8 @@
     },
     "publish": {
       "provider": "github",
+      "owner": "MohammedGamalll",
+      "repo": "b-livestats-handball",
       "releaseType": "release"
     }
   }
