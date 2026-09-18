@@ -129,7 +129,7 @@ if (skipBuild) {
     "electron-builder",
     "--win",
     "nsis",
-    `--config.directories.output=${outDir}`,
+    `--config.directories.output=release-publish`,
     "--publish",
     "never",
   ];
