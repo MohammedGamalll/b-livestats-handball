@@ -11,6 +11,26 @@ function parseSubPair(raw) {
   return {};
 }
 
+function isPersonalJersey(raw) {
+  const s = String(raw || "").trim();
+  return !!s && !s.includes("↔");
+}
+
+function eventMentionsPlayer(raw, no) {
+  const want = String(no || "").trim();
+  if (!want) return false;
+  return parseSubNos(raw).includes(want);
+}
+
+function maxPeriodFromEvents(events, minHalves) {
+  let max = Math.max(1, minHalves || 2);
+  for (const e of events || []) {
+    const h = eventHalf(e);
+    if (h && h > max) max = h;
+  }
+  return max;
+}
+
 function eventHalf(e) {
   const h = Number(e?.half);
   return Number.isFinite(h) && h >= 1 ? h : undefined;
@@ -49,7 +69,10 @@ function eventElapsedSec(e, halfLength, otLength, halves) {
   let elapsedBefore = 0;
   for (let h = 1; h < half; h++) elapsedBefore += (h > halves ? otLength : halfLength) * 60;
   const thisLen = (half > halves ? otLength : halfLength) * 60;
-  return elapsedBefore + Math.max(0, thisLen - clockSec);
+  const inPeriod = e.clockElapsed
+    ? Math.min(thisLen, Math.max(0, clockSec))
+    : Math.max(0, thisLen - clockSec);
+  return elapsedBefore + inPeriod;
 }
 
 function emptyKeeper(p) {
@@ -105,6 +128,19 @@ function applyDirectedSub(onCourt, raw, reverse) {
   else onCourt.add(only);
 }
 
+function applyTeamSub(onCourt, raw, permanentlyOut) {
+  const blocked = (no) => !no || (permanentlyOut && permanentlyOut.has(no));
+  const { inNo, outNo } = parseSubPair(raw);
+  if (inNo && outNo) {
+    if (!blocked(outNo)) onCourt.delete(outNo);
+    if (!blocked(inNo)) onCourt.add(inNo);
+    return;
+  }
+  const only = inNo || outNo;
+  if (blocked(only)) return;
+  applyDirectedSub(onCourt, raw, false);
+}
+
 function reconstructKickoffOnCourt(team, log, teamN, halfLength, otLength, halves) {
   const onCourt = endOnCourt(team);
   const reverse = [...sortEvents(log, halfLength, otLength, halves)].reverse();
@@ -124,17 +160,27 @@ function reconstructKickoffOnCourt(team, log, teamN, halfLength, otLength, halve
   return onCourt;
 }
 
-function currentGkNos(onCourt, gkNos) {
-  return [...onCourt].filter((no) => gkNos.has(no)).sort((a, b) => (Number(a) || 0) - (Number(b) || 0));
+function rosterGkNos(gks) {
+  return (gks || []).map((g) => String(g.no).trim()).filter(Boolean);
+}
+
+function pickActiveGk(onCourt, rosterOrder, prev) {
+  const present = (rosterOrder || []).filter((no) => onCourt.has(no));
+  if (!present.length) return "";
+  if (present.length === 1) return present[0];
+  if (prev && present.includes(prev)) return prev;
+  return present[0];
+}
+
+function activeAfterSub(onCourt, gkNos, rosterOrder, prev, raw) {
+  const { inNo } = parseSubPair(raw);
+  if (inNo && gkNos.has(inNo) && onCourt.has(inNo)) return inNo;
+  return pickActiveGk(onCourt, rosterOrder, prev);
 }
 
 function isGkSub(e, teamN, gkNos) {
   if (e.team !== teamN || e.action !== "SUBSTITUTION") return false;
   return parseSubNos(e.playerNo).some((n) => gkNos.has(n));
-}
-
-function gkSubInHalf(log, teamN, gkNos, half) {
-  return (log || []).some((e) => isGkSub(e, teamN, gkNos) && eventHalf(e) === half);
 }
 
 function setCourtGk(onCourt, gkNos, next) {
@@ -234,37 +280,41 @@ function attributeGoalkeepers(team, log, teamN, opts) {
   for (let h = 1; h <= maxHalf; h++) matchEnd += (h > halves ? otLength : halfLength) * 60;
 
   const kickoff = reconstructKickoffOnCourt(team, log, teamN, halfLength, otLength, halves);
-  const endGk = currentGkNos(endOnCourt(team), gkNos)[0] || currentGkNos(kickoff, gkNos)[0] || (gks[0] ? String(gks[0].no).trim() : "");
-  const otherGk = [...gkNos].find((n) => n && n !== endGk) || "";
-  const kickoffGk = currentGkNos(kickoff, gkNos)[0] || "";
-  const starterGk = otherGk && endGk && otherGk !== endGk ? otherGk : kickoffGk || endGk;
-  const secondGk = endGk || [...gkNos].find((n) => n !== starterGk) || starterGk;
-  const gkForHalf = (h) => (h <= 1 ? starterGk : secondGk);
+  const rosterOrder = rosterGkNos(gks);
+  const anySub = (log || []).some((e) => isGkSub(e, teamN, gkNos));
+  const useHalfHeuristic = gks.length === 2 && !anySub;
+  const endGk = pickActiveGk(endOnCourt(team), rosterOrder);
+  const kickoffGk = pickActiveGk(kickoff, rosterOrder);
+  const otherGk = rosterOrder.find((n) => n && n !== endGk) || "";
 
   let onCourt = new Set(kickoff);
-  if (gks.length >= 2 && starterGk) setCourtGk(onCourt, gkNos, starterGk);
+  let activeGk = kickoffGk;
+  if (useHalfHeuristic && otherGk && endGk && otherGk !== endGk) {
+    setCourtGk(onCourt, gkNos, otherGk);
+    activeGk = otherGk;
+  }
+
   let lastT = 0;
   let currentHalf = 1;
-  let gkNow = currentGkNos(onCourt, gkNos);
 
   for (const { e, t } of timed) {
     const h = eventHalf(e);
     if (h != null && h > currentHalf) {
-      addPlayTime(keepers, gkNow, lastT, t, cfg);
+      addPlayTime(keepers, activeGk ? [activeGk] : [], lastT, t, cfg);
       lastT = t;
-      if (!isGkSub(e, teamN, gkNos) && gks.length >= 2 && !gkSubInHalf(log, teamN, gkNos, h)) {
-        setCourtGk(onCourt, gkNos, gkForHalf(h));
-        gkNow = currentGkNos(onCourt, gkNos);
+      if (useHalfHeuristic && h > 1 && endGk) {
+        setCourtGk(onCourt, gkNos, endGk);
+        activeGk = endGk;
       }
       currentHalf = h;
     }
 
-    addPlayTime(keepers, gkNow, lastT, t, cfg);
+    addPlayTime(keepers, activeGk ? [activeGk] : [], lastT, t, cfg);
     lastT = t;
 
     if (e.team === teamN && e.action === "SUBSTITUTION") {
       applyDirectedSub(onCourt, e.playerNo, false);
-      gkNow = currentGkNos(onCourt, gkNos);
+      activeGk = activeAfterSub(onCourt, gkNos, rosterOrder, activeGk, e.playerNo);
     } else if (
       e.team === teamN &&
       (e.action === "2-MIN" || e.action === "RED" || e.action === "BLUE") &&
@@ -272,15 +322,15 @@ function attributeGoalkeepers(team, log, teamN, opts) {
       gkNos.has(e.playerNo)
     ) {
       onCourt.delete(e.playerNo);
-      gkNow = currentGkNos(onCourt, gkNos);
+      if (e.playerNo === activeGk) activeGk = pickActiveGk(onCourt, rosterOrder);
     }
 
     if (e.team === opp) {
       const kind = classifyGkShot(e);
-      if (kind && gkNow.length >= 1) creditShot(keepers.get(gkNow[0]), e, kind, h ?? currentHalf);
+      if (kind && activeGk) creditShot(keepers.get(activeGk), e, kind, h ?? currentHalf);
     }
   }
-  addPlayTime(keepers, gkNow, lastT, matchEnd, cfg);
+  addPlayTime(keepers, activeGk ? [activeGk] : [], lastT, matchEnd, cfg);
   return finalize(team, keepers);
 }
 
@@ -313,4 +363,11 @@ module.exports = {
   summarizeTeamShots,
   isOffFrameMiss,
   isPostMiss,
+  parseSubNos,
+  parseSubPair,
+  isPersonalJersey,
+  eventMentionsPlayer,
+  maxPeriodFromEvents,
+  applyDirectedSub,
+  applyTeamSub,
 };

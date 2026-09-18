@@ -12,7 +12,11 @@ export async function listTeams() {
   return api().listTeams();
 }
 
-export async function saveTeam({ data }: { data: { name: string; shortName?: string; color?: string; players: Player[] } }) {
+export async function saveTeam({
+  data,
+}: {
+  data: { name: string; shortName?: string; color?: string; coaches?: TeamSetup["coaches"]; players: Player[] };
+}) {
   return api().saveTeam(data);
 }
 
@@ -160,7 +164,7 @@ export interface PlayerCareer {
     yellow: number; twoMin: number; red: number;
     shootingPct: number;
   };
-  shotEvents: Array<{ team?: 1 | 2; x?: number; y?: number; goalX?: number; goalY?: number; action: string; subtype?: string; matchId: string }>;
+  shotEvents: Array<{ team?: 1 | 2; x?: number; y?: number; goalX?: number; goalY?: number; action: string; subtype?: string; half?: number; matchId: string }>;
 }
 
 export async function listPlayers() {

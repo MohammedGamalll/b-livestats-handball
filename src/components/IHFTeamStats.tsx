@@ -2,7 +2,7 @@ import type { LogEntry, TeamSetup } from "@/lib/gameStore";
 import { buildBoxScore } from "@/lib/exportCsv";
 import { classifyZone, type Zone } from "@/components/TeamStatsTable";
 import { isFastBreak } from "@/lib/court";
-import { attributeGoalkeepers } from "@/lib/gkAttribution";
+import { attributeGoalkeepers, eventElapsedSec, isPersonalJersey } from "@/lib/gkAttribution";
 
 type Bucket = { g: number; a: number };
 const emptyB = (): Bucket => ({ g: 0, a: 0 });
@@ -33,25 +33,16 @@ function isMade(e: LogEntry) {
   return e.action === "GOAL" || e.action === "7M";
 }
 
-function eventTotalSec(e: LogEntry, halfLength: number, otLength: number, halves: number) {
-  const [mm, ss] = (e.clock || "00:00").split(":").map((v) => parseInt(v, 10) || 0);
-  const clockSec = mm * 60 + ss;
-  let elapsedBefore = 0;
-  for (let h = 1; h < e.half; h++) elapsedBefore += (h > halves ? otLength : halfLength) * 60;
-  const thisLen = (e.half > halves ? otLength : halfLength) * 60;
-  return elapsedBefore + (thisLen - clockSec);
-}
-
 function buildStrengthLookup(log: LogEntry[], halfLength: number, otLength: number, halves: number) {
   const susp = log
     .filter((e) => e.team && (e.action === "2-MIN" || e.action === "RED"))
     .map((e) => ({
       team: e.team as 1 | 2,
-      start: eventTotalSec(e, halfLength, otLength, halves),
-      end: eventTotalSec(e, halfLength, otLength, halves) + 120,
+      start: eventElapsedSec(e, halfLength, otLength, halves),
+      end: eventElapsedSec(e, halfLength, otLength, halves) + 120,
     }));
   return (e: LogEntry, teamN: 1 | 2) => {
-    const t = eventTotalSec(e, halfLength, otLength, halves);
+    const t = eventElapsedSec(e, halfLength, otLength, halves);
     const ownOut = susp.filter((s) => s.team === teamN && s.start <= t && s.end > t).length;
     const oppOut = susp.filter((s) => s.team !== teamN && s.start <= t && s.end > t).length;
     return { own: Math.max(3, 6 - ownOut), opp: Math.max(3, 6 - oppOut) };
@@ -105,7 +96,7 @@ export function IHFTeamStats({
   };
 
   log.forEach((e) => {
-    if (e.team === teamN && e.playerNo) {
+    if (e.team === teamN && isPersonalJersey(e.playerNo)) {
       const cats = catsFor(e);
       if (cats.length) {
         const rec = ensurePP(e.playerNo);

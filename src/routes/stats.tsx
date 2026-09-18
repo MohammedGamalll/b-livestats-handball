@@ -21,6 +21,7 @@ import { FileSpreadsheet, Printer } from "lucide-react";
 import { matchReportSearch } from "@/lib/matchReportSearch";
 import { useMatchReport } from "@/lib/useMatchReport";
 import { GKZonesPanel } from "@/components/GKZonesPanel";
+import { applyTeamSub, eventElapsedSec, isPersonalJersey, maxPeriodFromEvents } from "@/lib/gkAttribution";
 
 export const Route = createFileRoute("/stats")({
   validateSearch: matchReportSearch,
@@ -366,10 +367,11 @@ function StatsPage() {
                     </div>
                     <div className="text-[11px] text-neutral-600">
                       {(() => {
-                        const half = (n: 1 | 2, h: number) =>
-                          log.filter((e) => e.team === n && e.half === h && (e.action === "GOAL" || e.action === "7M")).length;
-                        const parts: string[] = [`(${half(1, 1)} - ${half(2, 1)})`];
-                        if (info.halves > 1) parts.push(`(${half(1, 2)} - ${half(2, 2)})`);
+                        const periodGoals = (n: 1 | 2, h: number) =>
+                          log.filter((e) => e.team === n && Number(e.half) === h && (e.action === "GOAL" || e.action === "7M")).length;
+                        const maxH = maxPeriodFromEvents(log, info.halves || 2);
+                        const parts: string[] = [];
+                        for (let h = 1; h <= maxH; h++) parts.push(`(${periodGoals(1, h)} - ${periodGoals(2, h)})`);
                         return parts.join(" ");
                       })()}
                     </div>
@@ -467,7 +469,7 @@ function StatsPage() {
             <TeamShotPanel teamName={team2.name || "Team 2"} totals={totals2} shots={log.filter((e) => e.team === 2 && (isPenaltyShot(e) || e.x != null))} team1Direction={team1Direction} />
           </div>
           <div className="flex justify-center gap-6 mt-3 text-xs">
-            <span className="text-brand-green font-bold">+ Made</span>
+            <span className="text-brand-green font-bold">+ GOAL</span>
             <span className="text-accent-red font-bold">− Missed / Saved</span>
           </div>
         </div>
@@ -576,24 +578,13 @@ const ACTION_GROUP: Partial<Record<LogEntry["action"], ActionGroupKey>> = {
   "TURNOVER": "TURNOVER",
 };
 
-function eventTotalSec(e: LogEntry, halfLength: number, otLength: number, halves: number): number {
-  const [mm, ss] = (e.clock || "00:00").split(":").map((v) => parseInt(v, 10) || 0);
-  const clockSec = mm * 60 + ss;
-  let elapsedBefore = 0;
-  for (let h = 1; h < e.half; h++) {
-    elapsedBefore += (h > halves ? otLength : halfLength) * 60;
-  }
-  const thisLen = (e.half > halves ? otLength : halfLength) * 60;
-  return elapsedBefore + (thisLen - clockSec);
-}
-
 function StrengthSituationTable({
   team1, team2, log, halfLength, otLength, halves,
 }: {
   team1: TeamSetup; team2: TeamSetup; log: LogEntry[];
   halfLength: number; otLength: number; halves: number;
 }) {
-  const withTime = log.map((e) => ({ e, t: eventTotalSec(e, halfLength, otLength, halves) }));
+  const withTime = log.map((e) => ({ e, t: eventElapsedSec(e, halfLength, otLength, halves) }));
   const chronological = [...withTime].sort((a, b) => a.t - b.t);
 
   const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -686,12 +677,6 @@ function StrengthSituationTable({
     });
   };
 
-  const parseSubNos = (raw?: string): string[] => {
-    if (!raw) return [];
-    if (raw.includes("↔")) return raw.split("↔").map((s) => s.trim()).filter(Boolean);
-    return [raw.trim()];
-  };
-
   // Per-event caches decided BEFORE applying the event's state effects.
   const situationByEntryId = new Map<string, { attackField: number; defendField: number; emptyAttack: boolean }>();
 
@@ -715,13 +700,7 @@ function StrengthSituationTable({
     const p = e.playerNo;
 
     if (e.action === "SUBSTITUTION") {
-      const nos = parseSubNos(e.playerNo);
-      // Toggle presence for each listed number (in↔out).
-      nos.forEach((no) => {
-        if (st.permanentlyOut.has(no)) return;
-        if (st.onCourt.has(no)) st.onCourt.delete(no);
-        else if (st.onCourt.size < 7) st.onCourt.add(no);
-      });
+      applyTeamSub(st.onCourt, e.playerNo, st.permanentlyOut);
     } else if (e.action === "2-MIN" && p) {
       st.onCourt.delete(p);
       st.suspendedCount += 1;
@@ -815,7 +794,7 @@ function StrengthSituationTable({
                   </th>
                   <th className="px-2 py-1 text-left font-bold uppercase border-r">Defense</th>
                   {groups.map((g) => (
-                    <th key={g} className="px-2 py-1 text-center font-bold uppercase">{g}</th>
+                    <th key={g} className="px-2 py-1 text-center font-bold uppercase">{g === "MADE" ? "GOAL" : g}</th>
                   ))}
                 </tr>
               </thead>
@@ -896,7 +875,7 @@ function ShootoutStats({ team1, team2, rounds }: { team1: TeamSetup; team2: Team
             <tr>
               <th className="px-2 py-1 text-left font-bold uppercase">#</th>
               <th className="px-2 py-1 text-left font-bold uppercase">Player</th>
-              <th className="px-2 py-1 text-center font-bold uppercase">Made</th>
+              <th className="px-2 py-1 text-center font-bold uppercase">GOAL</th>
               <th className="px-2 py-1 text-center font-bold uppercase">M/A</th>
               <th className="px-2 py-1 text-center font-bold uppercase">%</th>
             </tr>
@@ -1206,7 +1185,7 @@ function TeamTable({ name, color, team, stats, log, teamN }: { name: string; col
     return m;
   };
   log.forEach((e) => {
-    if (e.team === teamN && e.playerNo) {
+    if (e.team === teamN && isPersonalJersey(e.playerNo)) {
       const isBtEg = e.subtype === "BREAK THROUGH" || e.subtype === "EMPTY GOAL";
       const isShot = e.action === "GOAL" || e.action === "SHOT MISSED" || e.action === "SHOT SAVED" || e.action === "7M";
       const bump = (rec: ZoneCount) => {
@@ -1235,7 +1214,7 @@ function TeamTable({ name, color, team, stats, log, teamN }: { name: string; col
       if (e.action === "FOUL" && e.subtype === "7M") sb.r7m++;
     }
     // fouls caused by our player that gave a 7m to opponent
-    if (e.team === teamN && e.playerNo && e.action === "FOUL" && e.subtype === "7M") {
+    if (e.team === teamN && isPersonalJersey(e.playerNo) && e.action === "FOUL" && e.subtype === "7M") {
       const sb = ensureSub(e.playerNo);
       sb.p7m++;
     }
@@ -1267,7 +1246,7 @@ function TeamTable({ name, color, team, stats, log, teamN }: { name: string; col
   // per-player BT / EG counts (subtype on a shot) — track made/attempts
   const btEg = new Map<string, { btG: number; btA: number; egG: number; egA: number }>();
   log.forEach((e) => {
-    if (e.team !== teamN || !e.playerNo) return;
+    if (e.team !== teamN || !isPersonalJersey(e.playerNo)) return;
     if (!(e.action === "GOAL" || e.action === "SHOT MISSED" || e.action === "SHOT SAVED" || e.action === "7M")) return;
     const cur = btEg.get(e.playerNo) ?? { btG: 0, btA: 0, egG: 0, egA: 0 };
     const made = e.action === "GOAL" || e.action === "7M";
@@ -1413,7 +1392,7 @@ function PlayerAnalysisPanel({ teamName, color, team, log, teamN }: { teamName: 
   const playerByNo = new Map(team.players.map((p) => [p.no, p]));
 
   const teamShots = log.filter(
-    (e) => e.team === teamN && e.playerNo && (e.action === "GOAL" || e.action === "7M" || e.action === "SHOT MISSED" || e.action === "SHOT SAVED"),
+    (e) => e.team === teamN && isPersonalJersey(e.playerNo) && (e.action === "GOAL" || e.action === "7M" || e.action === "SHOT MISSED" || e.action === "SHOT SAVED"),
   );
 
   const goalShots = teamShots.filter((e) => e.action === "GOAL" || e.action === "7M");

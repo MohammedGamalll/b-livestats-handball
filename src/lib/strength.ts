@@ -1,4 +1,5 @@
 import type { LogEntry, TeamSetup } from "@/lib/gameStore";
+import { applyTeamSub, eventElapsedSec } from "@/lib/gkAttribution";
 
 // Robust goalkeeper predicate — mirrors the one in stats.tsx.
 export function buildIsGK(team: TeamSetup): (no: string) => boolean {
@@ -86,17 +87,6 @@ const ACTION_GROUP_KEYS: Partial<Record<LogEntry["action"], true>> = {
   "TURNOVER": true,
 };
 
-function eventTotalSec(e: LogEntry, halfLength: number, otLength: number, halves: number): number {
-  const [mm, ss] = (e.clock || "00:00").split(":").map((v) => parseInt(v, 10) || 0);
-  const clockSec = mm * 60 + ss;
-  let elapsedBefore = 0;
-  for (let h = 1; h < e.half; h++) {
-    elapsedBefore += (h > halves ? otLength : halfLength) * 60;
-  }
-  const thisLen = (e.half > halves ? otLength : halfLength) * 60;
-  return elapsedBefore + (thisLen - clockSec);
-}
-
 export function buildSituationTimeline(
   team1: TeamSetup,
   team2: TeamSetup,
@@ -104,7 +94,7 @@ export function buildSituationTimeline(
   opts: { halfLength: number; otLength: number; halves: number },
 ): Map<string, SituationRow> {
   const { halfLength, otLength, halves } = opts;
-  const withTime = log.map((e) => ({ e, t: eventTotalSec(e, halfLength, otLength, halves) }));
+  const withTime = log.map((e) => ({ e, t: eventElapsedSec(e, halfLength, otLength, halves) }));
   const chronological = [...withTime].sort((a, b) => a.t - b.t);
 
   const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -168,12 +158,6 @@ export function buildSituationTimeline(
     });
   };
 
-  const parseSubNos = (raw?: string): string[] => {
-    if (!raw) return [];
-    if (raw.includes("↔")) return raw.split("↔").map((s) => s.trim()).filter(Boolean);
-    return [raw.trim()];
-  };
-
   const situationByEntryId = new Map<string, SituationRow>();
 
   chronological.forEach(({ e, t }) => {
@@ -195,12 +179,7 @@ export function buildSituationTimeline(
     const p = e.playerNo;
 
     if (e.action === "SUBSTITUTION") {
-      const nos = parseSubNos(e.playerNo);
-      nos.forEach((no) => {
-        if (st.permanentlyOut.has(no)) return;
-        if (st.onCourt.has(no)) st.onCourt.delete(no);
-        else if (st.onCourt.size < 7) st.onCourt.add(no);
-      });
+      applyTeamSub(st.onCourt, e.playerNo, st.permanentlyOut);
     } else if (e.action === "2-MIN" && p) {
       st.onCourt.delete(p);
       st.suspendedCount += 1;

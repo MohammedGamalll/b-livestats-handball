@@ -3,7 +3,13 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const Database = require("better-sqlite3");
 const { classifyShotZoneOrOverride } = require("./court.cjs");
-const { attributeGoalkeepers, keeperByNo } = require("./gk.cjs");
+const {
+  attributeGoalkeepers,
+  keeperByNo,
+  parseSubNos,
+  isPersonalJersey,
+  eventMentionsPlayer,
+} = require("./gk.cjs");
 
 const nkey = (s) => (s || "").trim().toLowerCase();
 const uuid = () => crypto.randomUUID();
@@ -18,6 +24,14 @@ let dbFilePath = null;
 function applySchema(database) {
   const schemaPath = path.join(__dirname, "schema.sql");
   database.exec(fs.readFileSync(schemaPath, "utf8"));
+  const cols = database.prepare("PRAGMA table_info(teams)").all().map((c) => c.name);
+  if (!cols.includes("coaches_json")) {
+    database.exec("ALTER TABLE teams ADD COLUMN coaches_json TEXT");
+  }
+  const matchCols = database.prepare("PRAGMA table_info(matches)").all().map((c) => c.name);
+  if (!matchCols.includes("clock_count_up")) {
+    database.exec("ALTER TABLE matches ADD COLUMN clock_count_up INTEGER DEFAULT 0");
+  }
 }
 
 function initDatabase(dbPath) {
@@ -130,9 +144,19 @@ function mapPlayer(p) {
   };
 }
 
+function parseCoaches(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function listTeams() {
   const teams = getDb()
-    .prepare("SELECT id, name, short_name, color, updated_at FROM teams ORDER BY updated_at DESC")
+    .prepare("SELECT id, name, short_name, color, coaches_json, updated_at FROM teams ORDER BY updated_at DESC")
     .all();
   const playersStmt = getDb().prepare(
     "SELECT id, no, name, surname, position, captain, playing, height, add_info FROM team_players WHERE team_id = ?",
@@ -143,6 +167,7 @@ function listTeams() {
     shortName: t.short_name || "",
     color: t.color || "#00a040",
     updatedAt: new Date(t.updated_at).getTime(),
+    coaches: parseCoaches(t.coaches_json),
     players: playersStmt.all(t.id).map(mapPlayer),
   }));
 }
@@ -153,20 +178,21 @@ function upsertTeam(team) {
   const key = nkey(name);
   const existing = getDb().prepare("SELECT id FROM teams WHERE name_key = ?").get(key);
   const conn = getDb();
+  const coachesJson = Array.isArray(team.coaches) ? JSON.stringify(team.coaches) : null;
   let teamId;
   if (existing?.id) {
     teamId = existing.id;
     conn
-      .prepare("UPDATE teams SET name = ?, short_name = ?, color = ?, updated_at = ? WHERE id = ?")
-      .run(name, team.shortName || null, team.color || null, nowIso(), teamId);
+      .prepare("UPDATE teams SET name = ?, short_name = ?, color = ?, coaches_json = ?, updated_at = ? WHERE id = ?")
+      .run(name, team.shortName || null, team.color || null, coachesJson, nowIso(), teamId);
     conn.prepare("DELETE FROM team_players WHERE team_id = ?").run(teamId);
   } else {
     teamId = uuid();
     conn
       .prepare(
-        "INSERT INTO teams (id, name, name_key, short_name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO teams (id, name, name_key, short_name, color, coaches_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
-      .run(teamId, name, key, team.shortName || null, team.color || null, nowIso(), nowIso());
+      .run(teamId, name, key, team.shortName || null, team.color || null, coachesJson, nowIso(), nowIso());
   }
   const players = Array.isArray(team.players) ? team.players : [];
   if (players.length) {
@@ -245,10 +271,10 @@ function saveMatch(data) {
   getDb()
     .prepare(
       `INSERT INTO matches (
-        id, competition, season, date, venue, city, country, halves, half_length,
+        id, competition, season, date, venue, city, country, halves, half_length, clock_count_up,
         team1_id, team2_id, team1_name, team2_name, team1_color, team2_color,
         team1_snapshot, team2_snapshot, score1, score2, shootout1, shootout2, finished_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       matchId,
@@ -260,6 +286,7 @@ function saveMatch(data) {
       info.country || null,
       info.halves || null,
       info.halfLength || null,
+      1,
       t1Id,
       t2Id,
       data.team1.name || "Team 1",
@@ -341,6 +368,12 @@ function listPlayers() {
   return out;
 }
 
+function markPlayed(playedInMatch, no, matchId) {
+  const key = String(no || "").trim();
+  if (!key) return;
+  (playedInMatch.get(key) || playedInMatch.set(key, new Set()).get(key)).add(matchId);
+}
+
 function mapEvent(e) {
   return {
     team: e.team,
@@ -354,6 +387,7 @@ function mapEvent(e) {
     involver_no: e.involver_no,
     rebound_team: e.rebound_team,
     rebound_no: e.rebound_no,
+    assist_no: e.assist_no,
     fast_break: asFastBreak(e.fast_break),
     miss_zone: e.miss_zone,
     zone: e.zone,
@@ -438,7 +472,7 @@ function seedNamedPlayer(rowByNo, p) {
 function getMatchDetail({ id }) {
   const m = getDb()
     .prepare(
-      `SELECT id, competition, season, date, venue, city, country, halves, half_length,
+      `SELECT id, competition, season, date, venue, city, country, halves, half_length, clock_count_up,
               team1_name, team2_name, team1_color, team2_color, team1_snapshot, team2_snapshot,
               score1, score2, shootout1, shootout2, finished_at
        FROM matches WHERE id = ?`,
@@ -473,7 +507,7 @@ function getMatchDetail({ id }) {
     score2: m.score2 || 0,
     shootout1: m.shootout1 ?? null,
     shootout2: m.shootout2 ?? null,
-    log: events.map(eventToLogEntry),
+    log: events.map((e) => ({ ...eventToLogEntry(e), clockElapsed: asBool(m.clock_count_up) || undefined })),
   };
 }
 
@@ -490,7 +524,7 @@ function getPlayerReport({ teamName, playerNo }) {
 
   const matches = getDb()
     .prepare(
-      `SELECT id, date, competition, halves, half_length, team1_id, team2_id, team1_name, team2_name,
+      `SELECT id, date, competition, halves, half_length, clock_count_up, team1_id, team2_id, team1_name, team2_name,
               team1_snapshot, team2_snapshot,
               score1, score2, shootout1, shootout2, finished_at
        FROM matches WHERE team1_id = ? OR team2_id = ? ORDER BY finished_at DESC`,
@@ -586,11 +620,20 @@ function getPlayerReport({ teamName, playerNo }) {
     } else ms.result = "D";
 
     let appeared = false;
+    let assistsAction = 0;
+    let assistsField = 0;
     for (const e of events) {
       const isShot = e.action === "GOAL" || e.action === "SHOT MISSED" || e.action === "SHOT SAVED" || e.action === "7M";
       const made = e.action === "GOAL" || e.action === "7M";
 
-      if (e.team === ownSide && String(e.player_no || "").trim() === no) {
+      if (e.team === ownSide && eventMentionsPlayer(e.player_no, no)) appeared = true;
+      if (e.team === ownSide && String(e.assist_no || "").trim() === no && (e.action === "GOAL" || e.action === "7M")) {
+        appeared = true;
+        assistsField++;
+      }
+      if (e.rebound_team === ownSide && String(e.rebound_no || "").trim() === no) appeared = true;
+
+      if (e.team === ownSide && isPersonalJersey(e.player_no) && String(e.player_no || "").trim() === no) {
         appeared = true;
         if (isShot) {
           const isBtEg = e.subtype === "BREAK THROUGH" || e.subtype === "EMPTY GOAL";
@@ -642,6 +685,7 @@ function getPlayerReport({ teamName, playerNo }) {
               goalY: e.goal_y,
               action: e.action,
               subtype: e.subtype,
+              half: e.half,
               matchId: m.id,
             });
             break;
@@ -660,6 +704,7 @@ function getPlayerReport({ teamName, playerNo }) {
               goalY: e.goal_y,
               action: e.action,
               subtype: e.subtype,
+              half: e.half,
               matchId: m.id,
             });
             break;
@@ -676,6 +721,7 @@ function getPlayerReport({ teamName, playerNo }) {
               goalY: e.goal_y,
               action: e.action,
               subtype: e.subtype,
+              half: e.half,
               matchId: m.id,
             });
             break;
@@ -692,12 +738,12 @@ function getPlayerReport({ teamName, playerNo }) {
               goalY: e.goal_y,
               action: e.action,
               subtype: e.subtype,
+              half: e.half,
               matchId: m.id,
             });
             break;
           case "ASSIST":
-            ms.assists++;
-            career.totals.assists++;
+            assistsAction++;
             break;
           case "STEAL":
             ms.steals++;
@@ -762,13 +808,16 @@ function getPlayerReport({ teamName, playerNo }) {
       }
     }
 
+    ms.assists = Math.max(assistsAction, assistsField);
+    career.totals.assists += ms.assists;
+
     if (isGK) {
       const ownTeam = parseTeamSnapshot(
         ownSide === 1 ? m.team1_snapshot : m.team2_snapshot,
         ownSide === 1 ? m.team1_name : m.team2_name,
         "#00a040",
       );
-      const log = rawEvents.map(eventToLogEntry);
+      const log = rawEvents.map((e) => ({ ...eventToLogEntry(e), clockElapsed: asBool(m.clock_count_up) || undefined }));
       const report = attributeGoalkeepers(ownTeam, log, ownSide, {
         halves: m.halves || 2,
         halfLength: m.half_length || 30,
@@ -883,7 +932,7 @@ function getSeasonBoxScore({ teamName }) {
     .all(team.id, team.id);
   const eventsStmt = getDb().prepare(
     `SELECT team, player_no, action, subtype, x, y, goal_x, goal_y, involver_no,
-            rebound_team, rebound_no, fast_break, zone
+            rebound_team, rebound_no, assist_no, fast_break, zone
      FROM match_events WHERE match_id = ?`,
   );
 
@@ -945,7 +994,17 @@ function getSeasonBoxScore({ teamName }) {
     });
 
     const events = eventsStmt.all(m.id).map(mapEvent);
+    const assistsAction = new Map();
+    const assistsField = new Map();
     for (const e of events) {
+      if (e.rebound_team === ownSide && e.rebound_no) markPlayed(playedInMatch, e.rebound_no, m.id);
+      if (e.team === ownSide && (e.action === "GOAL" || e.action === "7M") && e.assist_no) {
+        const ast = String(e.assist_no).trim();
+        if (ast) {
+          markPlayed(playedInMatch, ast, m.id);
+          assistsField.set(ast, (assistsField.get(ast) || 0) + 1);
+        }
+      }
       if (e.team !== ownSide) {
         const invNo = e.involver_no ? String(e.involver_no).trim() : "";
         if (invNo) {
@@ -961,11 +1020,11 @@ function getSeasonBoxScore({ teamName }) {
             ) {
               row.rf++;
               if (e.action === "FOUL" && e.subtype === "7M") row.r7m++;
-              (playedInMatch.get(invNo) || playedInMatch.set(invNo, new Set()).get(invNo)).add(m.id);
+              markPlayed(playedInMatch, invNo, m.id);
             }
             if (e.action === "TURNOVER") {
               row.steals++;
-              (playedInMatch.get(invNo) || playedInMatch.set(invNo, new Set()).get(invNo)).add(m.id);
+              markPlayed(playedInMatch, invNo, m.id);
             }
           }
         }
@@ -979,7 +1038,7 @@ function getSeasonBoxScore({ teamName }) {
             const row = rowByNo.get(blockerNo);
             if (row) {
               row.blocks++;
-              (playedInMatch.get(blockerNo) || playedInMatch.set(blockerNo, new Set()).get(blockerNo)).add(m.id);
+              markPlayed(playedInMatch, blockerNo, m.id);
             }
           }
         }
@@ -988,9 +1047,13 @@ function getSeasonBoxScore({ teamName }) {
 
       const pno = e.player_no ? String(e.player_no).trim() : "";
       if (!pno) continue;
+      if (!isPersonalJersey(pno)) {
+        for (const n of parseSubNos(pno)) markPlayed(playedInMatch, n, m.id);
+        continue;
+      }
       const row = rowByNo.get(pno);
       if (!row) continue;
-      (playedInMatch.get(pno) || playedInMatch.set(pno, new Set()).get(pno)).add(m.id);
+      markPlayed(playedInMatch, pno, m.id);
 
       const isShot = e.action === "GOAL" || e.action === "SHOT MISSED" || e.action === "SHOT SAVED" || e.action === "7M";
       const made = e.action === "GOAL" || e.action === "7M";
@@ -1054,7 +1117,7 @@ function getSeasonBoxScore({ teamName }) {
           row.saved++;
           break;
         case "ASSIST":
-          row.assists++;
+          assistsAction.set(pno, (assistsAction.get(pno) || 0) + 1);
           break;
         case "STEAL":
           row.steals++;
@@ -1075,6 +1138,11 @@ function getSeasonBoxScore({ teamName }) {
           if (e.subtype === "7M") row.p7m++;
           break;
       }
+    }
+    const assistNos = new Set([...assistsAction.keys(), ...assistsField.keys()]);
+    for (const n of assistNos) {
+      const row = rowByNo.get(n);
+      if (row) row.assists += Math.max(assistsAction.get(n) || 0, assistsField.get(n) || 0);
     }
   }
 

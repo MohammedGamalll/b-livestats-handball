@@ -38,6 +38,8 @@ export interface LogEntry {
   action: ActionType | string;
   half: number;
   clock: string;
+  /** true = clock is elapsed (00:00 → 30:00). omitted/false = legacy remaining countdown. */
+  clockElapsed?: boolean;
   x?: number; // 0..1 court coord (shot origin)
   y?: number; // 0..1 court coord (shot origin)
   goalX?: number; // 0..1 placement inside goal mouth
@@ -107,7 +109,10 @@ interface State {
   possession: 1 | 2 | null;
   half: number;
   clockSec: number;
+  clockCountUp: boolean;
   clockRunning: boolean;
+  clockOriginMs: number | null;
+  clockOriginSec: number;
   timeouts1: number;
   timeouts2: number;
   suspensions1: number;
@@ -221,6 +226,73 @@ const fmtClock = (s: number) => {
   return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 };
 
+function parseClockToSec(clock?: string): number {
+  const [mm, ss] = String(clock || "00:00").split(":").map((v) => parseInt(v, 10) || 0);
+  return mm * 60 + ss;
+}
+
+export function periodLengthSec(half: number, halves: number, halfLength: number, otLength: number): number {
+  return (half > halves ? otLength : halfLength) * 60;
+}
+
+function storePeriodLen(s: { half: number; info: GameInfo }): number {
+  return periodLengthSec(s.half, s.info.halves, s.info.halfLength, s.info.otLength);
+}
+
+function wallElapsedSec(s: { clockRunning: boolean; clockSec: number; clockOriginMs: number | null; clockOriginSec: number; half: number; info: GameInfo }): number {
+  const limit = storePeriodLen(s);
+  if (!s.clockRunning || s.clockOriginMs == null) return Math.min(limit, Math.max(0, s.clockSec));
+  return Math.min(limit, Math.max(0, s.clockOriginSec + Math.floor((Date.now() - s.clockOriginMs) / 1000)));
+}
+
+function applyClockTo(s: State, nextSec: number, running: boolean): Partial<State> {
+  const limit = storePeriodLen(s);
+  const next = Math.min(limit, Math.max(0, nextSec));
+  const delta = Math.max(0, next - s.clockSec);
+  let team1 = s.team1;
+  let team2 = s.team2;
+  let activeSuspensions = s.activeSuspensions;
+  if (delta > 0 && activeSuspensions.length) {
+    const ticked = activeSuspensions.map((su) => ({ ...su, remainingSec: Math.max(0, su.remainingSec - delta) }));
+    const expired = ticked.filter((su) => su.remainingSec === 0);
+    activeSuspensions = ticked.filter((su) => su.remainingSec > 0);
+    if (expired.length) {
+      const restore = (t: TeamSetup, team: 1 | 2): TeamSetup => {
+        const nos = expired.filter((su) => su.team === team).map((su) => su.playerNo);
+        if (!nos.length) return t;
+        return { ...t, players: t.players.map((p) => (nos.includes(p.no) && !p.excluded ? { ...p, onCourt: true } : p)) };
+      };
+      team1 = restore(team1, 1);
+      team2 = restore(team2, 2);
+    }
+  }
+  const over = next >= limit;
+  return {
+    clockSec: next,
+    clockRunning: over ? false : running,
+    clockOriginMs: over || !running ? null : s.clockOriginMs,
+    activeSuspensions,
+    team1,
+    team2,
+  };
+}
+
+function migrateCountdownToElapsed<T extends Partial<State>>(p: T): T {
+  if (p.clockCountUp === true) return p;
+  const info = { ...blankInfo(), ...(p.info || {}) };
+  const half = p.half ?? 1;
+  const limit = periodLengthSec(half, info.halves, info.halfLength, info.otLength);
+  const clockSec = typeof p.clockSec === "number" ? Math.max(0, Math.min(limit, limit - p.clockSec)) : 0;
+  const log = (p.log || []).map((e) => {
+    if (e.clockElapsed) return e;
+    const h = Number(e.half) || half;
+    const thisLen = periodLengthSec(h, info.halves, info.halfLength, info.otLength);
+    const remaining = parseClockToSec(e.clock);
+    return { ...e, clock: fmtClock(Math.max(0, Math.min(thisLen, thisLen - remaining))), clockElapsed: true };
+  });
+  return { ...p, clockSec, log, clockCountUp: true };
+}
+
 function mirrorFormation(f: Formation): Formation {
   const next: Formation = {};
   for (const [id, pos] of Object.entries(f)) {
@@ -264,8 +336,11 @@ export const useGameStore = create<State>()(
       score2: 0,
       possession: null,
       half: 1,
-      clockSec: 30 * 60,
+      clockSec: 0,
+      clockCountUp: true,
       clockRunning: false,
+      clockOriginMs: null,
+      clockOriginSec: 0,
       timeouts1: 0,
       timeouts2: 0,
       suspensions1: 0,
@@ -354,38 +429,47 @@ export const useGameStore = create<State>()(
       setSetupComplete: (b) =>
         set((s) => {
           if (b && !s.setupComplete) {
-            return { setupComplete: true, clockSec: s.info.halfLength * 60 };
+            return { setupComplete: true, clockSec: 0, clockCountUp: true };
           }
           return { setupComplete: b };
         }),
 
-      startClock: () => set({ clockRunning: true }),
-      stopClock: () => set({ clockRunning: false }),
+      startClock: () =>
+        set((s) => ({
+          clockRunning: true,
+          clockOriginMs: Date.now(),
+          clockOriginSec: s.clockSec,
+        })),
+      stopClock: () =>
+        set((s) => applyClockTo(s, wallElapsedSec(s), false)),
       tick: () =>
         set((s) => {
-          const next = Math.max(0, s.clockSec - 1);
-          const ticked = s.activeSuspensions.map((su) => ({ ...su, remainingSec: Math.max(0, su.remainingSec - 1) }));
-          const expired = ticked.filter((su) => su.remainingSec === 0);
-          const activeSuspensions = ticked.filter((su) => su.remainingSec > 0);
-          // Auto-return suspended players to the court when their 2-min ends (skip excluded RED/BLUE players)
-          let team1 = s.team1, team2 = s.team2;
-          if (expired.length) {
-            const restore = (t: TeamSetup, team: 1 | 2): TeamSetup => {
-              const nos = expired.filter((su) => su.team === team).map((su) => su.playerNo);
-              if (!nos.length) return t;
-              return { ...t, players: t.players.map((p) => (nos.includes(p.no) && !p.excluded ? { ...p, onCourt: true } : p)) };
-            };
-            team1 = restore(team1, 1);
-            team2 = restore(team2, 2);
+          if (!s.clockRunning) return {};
+          const originMs = s.clockOriginMs ?? Date.now();
+          const originSec = s.clockOriginMs == null ? s.clockSec : s.clockOriginSec;
+          const live = { ...s, clockOriginMs: originMs, clockOriginSec: originSec, clockRunning: true };
+          const patch = applyClockTo(live, wallElapsedSec(live), true);
+          if (s.clockOriginMs == null) {
+            patch.clockOriginMs = originMs;
+            patch.clockOriginSec = originSec;
           }
-          if (next === 0) return { clockSec: 0, clockRunning: false, activeSuspensions, team1, team2 };
-          return { clockSec: next, activeSuspensions, team1, team2 };
+          return patch;
         }),
-      setClockSec: (s) => set({ clockSec: s }),
+      setClockSec: (sec) =>
+        set((s) => {
+          const clamped = Math.max(0, Math.min(storePeriodLen(s), sec));
+          if (s.clockRunning) {
+            return { clockSec: clamped, clockOriginMs: Date.now(), clockOriginSec: clamped };
+          }
+          return { clockSec: clamped };
+        }),
       setHalf: (h) =>
         set((s) => ({
           half: h,
-          clockSec: (h > s.info.halves ? s.info.otLength : s.info.halfLength) * 60,
+          clockSec: 0,
+          clockRunning: false,
+          clockOriginMs: null,
+          clockOriginSec: 0,
           halfDirections: {
             ...(s.halfDirections ?? { 1: s.team1Direction }),
             [h]: s.halfDirections?.[h] ?? s.team1Direction,
@@ -397,8 +481,7 @@ export const useGameStore = create<State>()(
           // Handball timeout rule: 2 team timeouts per half.
           // After minute 25 of the half (<= 5 min remaining), only 1 timeout is allowed in that half.
           if (e.action === "TIMEOUT" && (e.team === 1 || e.team === 2)) {
-            const halfLenSec = s.info.halfLength * 60;
-            const elapsedSec = halfLenSec - s.clockSec;
+            const elapsedSec = s.clockSec;
             const maxThisHalf = elapsedSec >= 25 * 60 ? 1 : 2;
             const usedThisHalf = s.log.filter(
               (l) => l.action === "TIMEOUT" && l.team === e.team && l.half === s.half,
@@ -419,6 +502,7 @@ export const useGameStore = create<State>()(
             ts: Date.now(),
             half: s.half,
             clock: fmtClock(s.clockSec),
+            clockElapsed: true,
           };
           let score1 = s.score1, score2 = s.score2;
           let possession = s.possession;
@@ -558,8 +642,11 @@ export const useGameStore = create<State>()(
           score2: 0,
           possession: null,
           half: 1,
-          clockSec: 30 * 60,
+          clockSec: 0,
+          clockCountUp: true,
           clockRunning: false,
+          clockOriginMs: null,
+          clockOriginSec: 0,
           timeouts1: 0,
           timeouts2: 0,
           suspensions1: 0,
@@ -698,12 +785,15 @@ export const useGameStore = create<State>()(
     {
       name: "b-livestats",
       merge: (persisted, current) => {
-        const p = (persisted ?? {}) as Partial<State>;
+        const p = migrateCountdownToElapsed((persisted ?? {}) as Partial<State>);
         const team1Direction = p.team1Direction ?? current.team1Direction;
         const half = p.half ?? current.half;
         return {
           ...current,
           ...p,
+          clockCountUp: true,
+          clockOriginMs: null,
+          clockOriginSec: typeof p.clockSec === "number" ? p.clockSec : 0,
           halfDirections: p.halfDirections ?? { 1: team1Direction, [half]: team1Direction },
         };
       },

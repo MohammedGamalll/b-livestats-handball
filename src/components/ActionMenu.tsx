@@ -3,6 +3,13 @@ import { MADE_SUBTYPES, FOUL_SUBTYPES, MISSED_SUBTYPES, TURNOVER_SUBTYPES } from
 
 export type ActionGroup = "MADE" | "FOUL" | "MISSED" | "TURNOVER";
 
+export const ACTION_GROUP_LABEL: Record<ActionGroup, string> = {
+  MADE: "GOAL",
+  MISSED: "MISSED",
+  FOUL: "FOUL",
+  TURNOVER: "TURNOVER",
+};
+
 export interface ActionPick {
   group: ActionGroup;
   subtype: string;
@@ -62,7 +69,7 @@ export function ActionMenu({
       onClick={() => { setFb(false); setOpen(open === g ? null : g); }}
       className={`${btnClass} ${GROUP_STYLES[g]} ${open === g ? "ring-2 ring-accent-orange" : ""}`}
     >
-      {g}
+      {g === "MADE" ? "GOAL" : g}
     </button>
   );
 
@@ -97,7 +104,7 @@ export function ActionMenu({
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center" onClick={() => setOpen(null)}>
           <div className="bg-white rounded shadow-2xl p-4 min-w-[320px]" onClick={(e) => e.stopPropagation()}>
             <div className={`px-3 py-2 -mx-4 -mt-4 mb-3 font-bold uppercase tracking-wider text-sm ${GROUP_STYLES[open]}`}>
-              {open} — CHOOSE TYPE
+              {ACTION_GROUP_LABEL[open]} — CHOOSE TYPE
             </div>
             <div className="grid grid-cols-2 gap-2">
               {SUBS[open].map((s) => (

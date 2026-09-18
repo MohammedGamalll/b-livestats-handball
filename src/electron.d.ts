@@ -5,6 +5,7 @@ export type ElectronAPI = {
     shortName: string;
     color: string;
     updatedAt: number;
+    coaches?: Array<{ name: string; surname: string; role: string; country: string }>;
     players: Array<{
       id: string;
       no: string;

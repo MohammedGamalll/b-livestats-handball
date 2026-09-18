@@ -36,7 +36,13 @@ function TeamCard({ n }: { n: 1 | 2 }) {
     queryFn: () => listTeams(),
   });
   const saveMut = useMutation({
-    mutationFn: (t: { name: string; shortName?: string; color?: string; players: TeamSetup["players"] }) => saveTeam({ data: t }),
+    mutationFn: (t: {
+      name: string;
+      shortName?: string;
+      color?: string;
+      coaches?: TeamSetup["coaches"];
+      players: TeamSetup["players"];
+    }) => saveTeam({ data: t }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["teams"] }),
   });
   const delMut = useMutation({
@@ -49,7 +55,13 @@ function TeamCard({ n }: { n: 1 | 2 }) {
   const saveToLibrary = async () => {
     if (!team.name.trim()) { alert("Set a team name first."); return; }
     try {
-      await saveMut.mutateAsync({ name: team.name, shortName: team.shortName, color: team.color, players: team.players });
+      await saveMut.mutateAsync({
+        name: team.name,
+        shortName: team.shortName,
+        color: team.color,
+        coaches: team.coaches,
+        players: team.players,
+      });
       alert(`Saved "${team.name}" to team library.`);
     } catch (e) {
       alert("Failed to save: " + (e as Error).message);
@@ -58,7 +70,13 @@ function TeamCard({ n }: { n: 1 | 2 }) {
   const loadFromLibrary = (id: string) => {
     const t = savedTeams.find((x) => x.id === id);
     if (!t) return;
-    setTeam(n, { name: t.name, shortName: t.shortName || "", color: t.color, players: t.players.map((p) => ({ ...p })) });
+    setTeam(n, {
+      name: t.name,
+      shortName: t.shortName || "",
+      color: t.color,
+      coaches: t.coaches?.length ? t.coaches.map((c) => ({ ...c })) : undefined,
+      players: t.players.map((p) => ({ ...p })),
+    });
     setLibraryOpen(false);
   };
 

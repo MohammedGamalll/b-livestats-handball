@@ -6,8 +6,8 @@ import { HandballCourt } from "@/components/HandballCourt";
 import { LiveStatsStrip } from "@/components/LiveStatsStrip";
 import { ShootoutPanel } from "@/components/ShootoutPanel";
 import { GoalPicker } from "@/components/GoalPicker";
-import { ActionMenu, type ActionPick } from "@/components/ActionMenu";
-import { useGameStore, formatClock } from "@/lib/gameStore";
+import { ActionMenu, ACTION_GROUP_LABEL, type ActionPick } from "@/components/ActionMenu";
+import { useGameStore, formatClock, periodLengthSec } from "@/lib/gameStore";
 import type { MissZone } from "@/lib/gameStore";
 import { STARTERS_REQUIRED, type ActionType } from "@/lib/handball";
 import { downloadCsv, logToCsv } from "@/lib/exportCsv";
@@ -35,7 +35,6 @@ function GamePage() {
   const clockRunning = useGameStore((s) => s.clockRunning);
   const startClock = useGameStore((s) => s.startClock);
   const stopClock = useGameStore((s) => s.stopClock);
-  const tick = useGameStore((s) => s.tick);
   const setClockSec = useGameStore((s) => s.setClockSec);
   const setHalf = useGameStore((s) => s.setHalf);
   const half = useGameStore((s) => s.half);
@@ -45,6 +44,8 @@ function GamePage() {
   const log = useGameStore((s) => s.log);
   const reset = useGameStore((s) => s.reset);
   const info = useGameStore((s) => s.info);
+  const periodLen = periodLengthSec(half, info.halves, info.halfLength, info.otLength);
+  const periodOver = clockSec >= periodLen;
   const timeouts1 = useGameStore((s) => s.timeouts1);
   const timeouts2 = useGameStore((s) => s.timeouts2);
   const suspensions1 = useGameStore((s) => s.suspensions1);
@@ -94,12 +95,12 @@ function GamePage() {
 
   
 
-  // play buzzer when clock hits 0
+  // play buzzer when the period clock reaches its length (00 → 30)
   const prevClock = useRef(clockSec);
   useEffect(() => {
-    if (prevClock.current > 0 && clockSec === 0 && soundOn) sfx.buzzer();
+    if (prevClock.current < periodLen && clockSec >= periodLen && soundOn) sfx.buzzer();
     prevClock.current = clockSec;
-  }, [clockSec, soundOn]);
+  }, [clockSec, periodLen, soundOn]);
 
   // play goal/card sounds when log grows
   const prevLogLen = useRef(log.length);
@@ -117,12 +118,6 @@ function GamePage() {
   }, [log, soundOn]);
 
 
-  useEffect(() => {
-    if (!clockRunning) return;
-    const t = setInterval(() => tick(), 1000);
-    return () => clearInterval(t);
-  }, [clockRunning, tick]);
-
   // keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -130,7 +125,7 @@ function GamePage() {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (e.code === "Space") {
         e.preventDefault();
-        if (clockRunning) stopClock(); else if (clockSec > 0) startClock();
+        if (clockRunning) stopClock(); else if (!periodOver) startClock();
       } else if (e.key === "z" || e.key === "Z") {
         if (e.ctrlKey || e.metaKey) { e.preventDefault(); undoLast(); }
       }
@@ -143,7 +138,7 @@ function GamePage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clockRunning, clockSec, selected, possession]);
+  }, [clockRunning, clockSec, periodOver, selected, possession]);
 
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => { setHydrated(true); }, []);
@@ -482,7 +477,7 @@ function GamePage() {
                 {(() => {
                   const reg = info.halves;
                   const maxExHalf = reg + 4;
-                  if (clockSec !== 0) return null;
+                  if (!periodOver) return null;
                   if (half < reg) {
                     return (
                       <button onClick={() => setHalf(half + 1)} className="px-3 h-7 bg-tab-done text-white font-semibold text-xs">
@@ -496,7 +491,7 @@ function GamePage() {
                       return (
                         <>
                           <button
-                            onClick={() => { setHalf(half + 1); setClockSec(5 * 60); }}
+                            onClick={() => setHalf(half + 1)}
                             className="px-3 h-7 bg-accent-orange text-white font-semibold text-xs"
                           >
                             {`EXTRA TIME ${nextEx} (5 MIN)`}
@@ -528,10 +523,9 @@ function GamePage() {
                     <button onClick={() => finishMatch()} className="px-3 h-7 bg-tab-done text-white font-semibold text-xs">END MATCH</button>
                   );
                 })()}
-                {clockSec !== 0 && (
+                {!periodOver && (
                   <button
                     onClick={() => (clockRunning ? stopClock() : startClock())}
-                    disabled={clockSec === 0}
                     className={`px-3 h-7 text-white font-semibold text-xs disabled:opacity-40 ${clockRunning ? "bg-accent-orange" : "bg-accent-red"}`}
                   >
                     {clockRunning ? "STOP" : "START CLOCK"}
@@ -542,7 +536,7 @@ function GamePage() {
           </div>
           {pendingPick && (
             <div className="text-[10px] uppercase font-bold text-center text-accent-orange bg-white border-x border-b py-0.5">
-              {pendingPick.group}: {pendingPick.subtype} · click court
+              {ACTION_GROUP_LABEL[pendingPick.group]}: {pendingPick.subtype} · click court
             </div>
           )}
 
@@ -781,20 +775,29 @@ function GamePage() {
               </div>
               <div className={`grid gap-4 ${bothTeams ? "grid-cols-2" : "grid-cols-1"}`}>
                 {teamsToShow.map(({ n, t }) => {
-                  const players = t.players.filter((p) => p.onCourt);
+                  const eligible = t.players.filter((p) => p.playing !== false && !p.excluded);
+                  const on = eligible.filter((p) => p.onCourt);
+                  const bench = eligible.filter((p) => !p.onCourt);
+                  const renderBtn = (p: (typeof t.players)[number], dim = false) => (
+                    <button key={p.id} onClick={() => pick(p.no, n)} className={`h-14 text-white font-bold text-lg rounded hover:opacity-90 ${dim ? "opacity-80" : ""}`} style={{ background: t.color || "#666" }} title={`${p.no} ${p.name || ""}`}>
+                      {p.no || "—"}
+                    </button>
+                  );
                   return (
                     <div key={n}>
                       <div className="px-2 py-1 mb-2 text-white font-bold text-xs uppercase tracking-wider" style={{ background: t.color || "#666" }}>
                         {t.name || `Team ${n}`}
                       </div>
                       <div className="grid grid-cols-4 gap-2">
-                        {players.map((p) => (
-                          <button key={p.id} onClick={() => pick(p.no, n)} className="h-14 text-white font-bold text-lg rounded hover:opacity-90" style={{ background: t.color || "#666" }} title={`${p.no} ${p.name || ""}`}>
-                            {p.no || "—"}
-                          </button>
-                        ))}
-                        {players.length === 0 && (
-                          <div className="col-span-4 text-xs text-muted-foreground text-center py-4">No players on court</div>
+                        {on.map((p) => renderBtn(p))}
+                        {bench.length > 0 && (
+                          <>
+                            <div className="col-span-4 text-[10px] uppercase tracking-wider font-bold text-muted-foreground pt-1">Bench</div>
+                            {bench.map((p) => renderBtn(p, true))}
+                          </>
+                        )}
+                        {on.length === 0 && bench.length === 0 && (
+                          <div className="col-span-4 text-xs text-muted-foreground text-center py-4">No eligible players</div>
                         )}
                       </div>
                     </div>

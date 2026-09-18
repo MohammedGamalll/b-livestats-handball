@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useGameStore } from "@/lib/gameStore";
+import { isPersonalJersey } from "@/lib/gkAttribution";
 
 export function LiveStatsStrip() {
   const log = useGameStore((s) => s.log);
@@ -15,7 +16,8 @@ export function LiveStatsStrip() {
     for (const e of log) {
       if (e.half && e.half > maxHalf) maxHalf = e.half;
       if (e.action !== "GOAL" && e.action !== "7M") continue;
-      const h = e.half || 1;
+      const h = Number(e.half);
+      if (!Number.isFinite(h) || h < 1) continue;
       halfScores[h] ||= { s1: 0, s2: 0 };
       if (e.team === 1) halfScores[h].s1++;
       else if (e.team === 2) halfScores[h].s2++;
@@ -24,7 +26,7 @@ export function LiveStatsStrip() {
     const scorers = (teamN: 1 | 2, players: any[]) => {
       const counts: Record<string, number> = {};
       log.forEach((e) => {
-        if (e.team === teamN && (e.action === "GOAL" || e.action === "7M") && e.playerNo) {
+        if (e.team === teamN && (e.action === "GOAL" || e.action === "7M") && isPersonalJersey(e.playerNo)) {
           counts[e.playerNo] = (counts[e.playerNo] || 0) + 1;
         }
       });

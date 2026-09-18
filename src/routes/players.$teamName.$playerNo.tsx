@@ -289,11 +289,7 @@ function PlayerReportPage() {
                               : "Did not play"}
                           </div>
                         </div>
-                        {played ? <GoalMouthMarks shots={shots} /> : (
-                          <div className="border bg-muted/30 min-h-[120px] flex items-center justify-center text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                            Did not play
-                          </div>
-                        )}
+                        <GoalMouthMarks shots={shots} emptyLabel={played ? "No goal-mouth markers" : "Did not play"} />
                       </div>
                     );
                   })}
@@ -325,11 +321,7 @@ function PlayerReportPage() {
                               <div className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-1">
                                 {periodTitle(period, halves)}{played ? "" : " — Did not play"}
                               </div>
-                              {played ? <GoalMouthMarks shots={periodShots} /> : (
-                                <div className="border bg-muted/30 min-h-[100px] flex items-center justify-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                                  Did not play
-                                </div>
-                              )}
+                              <GoalMouthMarks shots={periodShots} emptyLabel={played ? "No goal-mouth markers" : "Did not play"} />
                             </div>
                             );
                           })}
@@ -368,7 +360,7 @@ function PlayerReportPage() {
                 <StatBox label="Goals" value={totals.goals} accent="#16a34a" />
                 <StatBox label="Missed" value={totals.missed} accent="#dc2626" />
                 <StatBox label="Saved" value={totals.saved} accent="#f59e0b" />
-                <StatBox label="7m Made/Att" value={`${totals.pen}/${totals.penAtt}`} />
+                <StatBox label="7m GOAL/Att" value={`${totals.pen}/${totals.penAtt}`} />
                 <StatBox label="Shooting %" value={`${totals.shootingPct.toFixed(1)}%`} />
               </div>
               {totals.shots > 0 && (

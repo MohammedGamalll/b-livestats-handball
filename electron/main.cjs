@@ -6,6 +6,10 @@ const crypto = require("node:crypto");
 
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
+if (!app.isPackaged) {
+  app.setPath("userData", path.join(app.getPath("appData"), "B-LiveStats-Handball-dev"));
+}
+
 const dbApi = require("./db.cjs");
 const { setupAutoUpdater, registerUpdateIpc } = require("./updater.cjs");
 

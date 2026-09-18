@@ -16,6 +16,7 @@ import { HandballCourt } from "@/components/HandballCourt";
 import { GoalPicker } from "@/components/GoalPicker";
 import { isPenaltyShot, penaltySpotForTeam, classifyShotZoneOrOverride, type CourtGeoZone } from "@/lib/court";
 import { buildSituationTimeline, strengthLabel } from "@/lib/strength";
+import { eventMentionsPlayer } from "@/lib/gkAttribution";
 
 
 export const Route = createFileRoute("/actions")({
@@ -133,7 +134,14 @@ function ActionsPage() {
 
   const filtered = log.filter((e) => {
     if (filter !== "all" && e.team !== filter) return false;
-    if (playerFilter !== "all" && String(e.playerNo ?? "") !== playerFilter) return false;
+    if (playerFilter !== "all") {
+      const hit =
+        eventMentionsPlayer(e.playerNo, playerFilter) ||
+        e.assistNo === playerFilter ||
+        e.involverNo === playerFilter ||
+        e.reboundNo === playerFilter;
+      if (!hit) return false;
+    }
     if (actionFilter !== "all" && e.action !== actionFilter) return false;
     if (subtypeFilter !== "all" && (e.subtype ?? "") !== subtypeFilter) return false;
     if (halfFilter !== "all" && String(e.half) !== halfFilter) return false;

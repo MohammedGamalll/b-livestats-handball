@@ -8,7 +8,8 @@ export default function GlobalClockTicker() {
 
   useEffect(() => {
     if (!clockRunning) return;
-    const timer = window.setInterval(() => tick(), 1000);
+    tick();
+    const timer = window.setInterval(() => tick(), 250);
     return () => window.clearInterval(timer);
   }, [clockRunning, tick]);
 

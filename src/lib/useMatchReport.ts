@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getMatchDetail } from "@/lib/db.functions";
 import { useGameStore, type TeamSetup } from "@/lib/gameStore";
+import { maxPeriodFromEvents } from "@/lib/gkAttribution";
 
 const emptyTeam: TeamSetup = {
   name: "",
@@ -54,7 +55,7 @@ export function useMatchReport(matchId?: string) {
   const team1Direction = archived ? "left" as const : liveTeam1Direction;
   const halfDirections = archived ? {} : liveHalfDirections;
   const half = archived
-    ? Math.max(info.halves || 2, ...log.map((e) => e.half || 1), 1)
+    ? maxPeriodFromEvents(log, info.halves || 2)
     : liveHalf;
 
   return {

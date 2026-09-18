@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS teams (
   name_key TEXT NOT NULL UNIQUE,
   short_name TEXT,
   color TEXT,
+  coaches_json TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS matches (
   country TEXT,
   half_length INTEGER,
   halves INTEGER,
+  clock_count_up INTEGER DEFAULT 0,
   team1_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
   team2_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
   team1_name TEXT NOT NULL,

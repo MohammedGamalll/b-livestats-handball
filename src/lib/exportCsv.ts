@@ -1,5 +1,5 @@
 import type { LogEntry, TeamSetup } from "./gameStore";
-import { attributeGoalkeepers, type GkAttrOpts } from "./gkAttribution";
+import { attributeGoalkeepers, isPersonalJersey, type GkAttrOpts } from "./gkAttribution";
 
 const esc = (v: unknown) => {
   const s = String(v ?? "");
@@ -65,69 +65,89 @@ export interface PlayerStat {
   fouls: number;
 }
 
+function emptyPlayerStat(no: string, name: string): PlayerStat {
+  return {
+    no,
+    name,
+    goals: 0, shots: 0, missed: 0, saved: 0, pen: 0, penAtt: 0,
+    assists: 0, steals: 0, turnovers: 0, blocks: 0,
+    yellow: 0, twoMin: 0, red: 0, blue: 0, inTarget: 0, outTarget: 0,
+    fouls: 0,
+  };
+}
+
 export function buildBoxScore(log: LogEntry[], team: TeamSetup, teamN: 1 | 2): PlayerStat[] {
   const map = new Map<string, PlayerStat>();
   team.players.forEach((p) => {
-    map.set(p.no, {
-      no: p.no,
-      name: `${p.name} ${p.surname}`.trim(),
-      goals: 0, shots: 0, missed: 0, saved: 0, pen: 0, penAtt: 0,
-      assists: 0, steals: 0, turnovers: 0, blocks: 0,
-      yellow: 0, twoMin: 0, red: 0, blue: 0, inTarget: 0, outTarget: 0,
-      fouls: 0,
-    });
+    if (!isPersonalJersey(p.no)) return;
+    map.set(p.no, emptyPlayerStat(p.no, `${p.name} ${p.surname}`.trim()));
   });
+  const ensureStat = (no: string) => {
+    let s = map.get(no);
+    if (!s) {
+      const pl = team.players.find((p) => p.no === no);
+      s = emptyPlayerStat(no, pl ? `${pl.name} ${pl.surname}`.trim() : `#${no}`);
+      map.set(no, s);
+    }
+    return s;
+  };
+  const assistsAction = new Map<string, number>();
+  const assistsField = new Map<string, number>();
+  const bumpAssist = (bucket: Map<string, number>, no: string) => {
+    bucket.set(no, (bucket.get(no) || 0) + 1);
+  };
+
   log.forEach((e) => {
-    // own-player events
-    if (e.team === teamN && e.playerNo) {
-      const s = map.get(e.playerNo);
-      if (s) {
-        const isPenSub = e.subtype === "PENALTY";
-        switch (e.action) {
-          case "GOAL": s.goals++; s.shots++; s.inTarget++; break;
-          case "SHOT MISSED":
-            s.missed++; s.shots++;
-            if (e.subtype === "SAVE") s.inTarget++;
-            else s.outTarget++;
-            if (isPenSub) s.penAtt++;
-            break;
-          case "SHOT SAVED":
-            s.saved++; s.shots++; s.inTarget++;
-            if (isPenSub) s.penAtt++;
-            break;
-          case "7M": s.goals++; s.shots++; s.pen++; s.penAtt++; s.inTarget++; break;
-          case "ASSIST": s.assists++; break;
-          case "STEAL": s.steals++; break;
-          case "TURNOVER": s.turnovers++; break;
-          case "BLOCK": /* legacy entries only — no credit to shooter */ break;
-          case "YELLOW": s.yellow++; s.fouls++; break;
-          case "2-MIN": s.twoMin++; s.fouls++; break;
-          case "RED": s.red++; /* ejection is not a foul */ break;
-          case "BLUE": s.blue++; s.fouls++; break;
-          case "FOUL": s.fouls++; break;
-        }
+    // own-player events stay on the jersey that logged them, even after a sub or in OT.
+    if (e.team === teamN && isPersonalJersey(e.playerNo)) {
+      const s = ensureStat(e.playerNo!);
+      const isPenSub = e.subtype === "PENALTY";
+      switch (e.action) {
+        case "GOAL": s.goals++; s.shots++; s.inTarget++; break;
+        case "SHOT MISSED":
+          s.missed++; s.shots++;
+          if (e.subtype === "SAVE") s.inTarget++;
+          else s.outTarget++;
+          if (isPenSub) s.penAtt++;
+          break;
+        case "SHOT SAVED":
+          s.saved++; s.shots++; s.inTarget++;
+          if (isPenSub) s.penAtt++;
+          break;
+        case "7M": s.goals++; s.shots++; s.pen++; s.penAtt++; s.inTarget++; break;
+        case "ASSIST": bumpAssist(assistsAction, e.playerNo!); break;
+        case "STEAL": s.steals++; break;
+        case "TURNOVER": s.turnovers++; break;
+        case "BLOCK": /* legacy entries only — no credit to shooter */ break;
+        case "YELLOW": s.yellow++; s.fouls++; break;
+        case "2-MIN": s.twoMin++; s.fouls++; break;
+        case "RED": s.red++; /* ejection is not a foul */ break;
+        case "BLUE": s.blue++; s.fouls++; break;
+        case "FOUL": s.fouls++; break;
       }
     }
+    if (e.team === teamN && (e.action === "GOAL" || e.action === "7M") && isPersonalJersey(e.assistNo)) {
+      bumpAssist(assistsField, e.assistNo!);
+      ensureStat(e.assistNo!);
+    }
     // opponent events with involver referring to our player
-    if (e.team && e.team !== teamN && e.involverNo) {
-      const s = map.get(e.involverNo);
-      if (s) {
-        // opponent turnover caused by our player → credit a steal
-        if (e.action === "TURNOVER") s.steals++;
-      }
+    if (e.team && e.team !== teamN && isPersonalJersey(e.involverNo)) {
+      const s = ensureStat(e.involverNo!);
+      if (e.action === "TURNOVER") s.steals++;
     }
     // opponent missed via BLOCK → defender (our team) credited with the block.
     // Prefer the explicit blocker (involverNo, new flow); fall back to reboundNo (legacy flow).
     if (e.team && e.team !== teamN && e.action === "SHOT MISSED" && e.subtype === "BLOCK") {
-      if (e.involverNo) {
-        const s = map.get(e.involverNo);
-        if (s) s.blocks++;
-      } else if (e.reboundTeam === teamN && e.reboundNo) {
-        const s = map.get(e.reboundNo);
-        if (s) s.blocks++;
+      if (isPersonalJersey(e.involverNo)) {
+        ensureStat(e.involverNo!).blocks++;
+      } else if (e.reboundTeam === teamN && isPersonalJersey(e.reboundNo)) {
+        ensureStat(e.reboundNo!).blocks++;
       }
     }
   });
+  for (const s of map.values()) {
+    s.assists = Math.max(assistsAction.get(s.no) || 0, assistsField.get(s.no) || 0);
+  }
   return Array.from(map.values()).filter((s) => s.no);
 }
 

@@ -1,6 +1,7 @@
 import { classifyShotZoneOrOverride, isFastBreak } from "@/lib/court";
 import type { LogEntry, TeamSetup } from "@/lib/gameStore";
 import type { buildBoxScore } from "@/lib/exportCsv";
+import { isPersonalJersey } from "@/lib/gkAttribution";
 
 export type Zone = "6m" | "Wing" | "9m" | "7m" | "FB";
 
@@ -29,7 +30,7 @@ export function TeamStatsTable({ name, color, team, stats, log, teamN }: { name:
     return m;
   };
   log.forEach((e) => {
-    if (e.team === teamN && e.playerNo) {
+    if (e.team === teamN && isPersonalJersey(e.playerNo)) {
       const isBtEg = e.subtype === "BREAK THROUGH" || e.subtype === "EMPTY GOAL";
       const isShot = e.action === "GOAL" || e.action === "SHOT MISSED" || e.action === "SHOT SAVED" || e.action === "7M";
       const bump = (rec: ZoneCount) => {
@@ -53,7 +54,7 @@ export function TeamStatsTable({ name, color, team, stats, log, teamN }: { name:
       if (e.action === "FOUL" || e.action === "7M" || e.action === "2-MIN" || e.action === "YELLOW" || e.action === "RED" || e.action === "BLUE") sb.rf++;
       if (e.action === "FOUL" && e.subtype === "7M") sb.r7m++;
     }
-    if (e.team === teamN && e.playerNo && e.action === "FOUL" && e.subtype === "7M") {
+    if (e.team === teamN && isPersonalJersey(e.playerNo) && e.action === "FOUL" && e.subtype === "7M") {
       const sb = ensureSub(e.playerNo);
       sb.p7m++;
     }
@@ -81,7 +82,7 @@ export function TeamStatsTable({ name, color, team, stats, log, teamN }: { name:
 
   const btEg = new Map<string, { btG: number; btA: number; egG: number; egA: number }>();
   log.forEach((e) => {
-    if (e.team !== teamN || !e.playerNo) return;
+    if (e.team !== teamN || !isPersonalJersey(e.playerNo)) return;
     if (!(e.action === "GOAL" || e.action === "SHOT MISSED" || e.action === "SHOT SAVED" || e.action === "7M")) return;
     const cur = btEg.get(e.playerNo) ?? { btG: 0, btA: 0, egG: 0, egA: 0 };
     const made = e.action === "GOAL" || e.action === "7M";
