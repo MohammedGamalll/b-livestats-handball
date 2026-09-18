@@ -4,7 +4,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const root = process.cwd();
-const outDir = path.join(root, "release-publish");
+const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const version = pkg.version;
+const outDirName = `release-${version}`;
+const outDir = path.join(root, outDirName);
 const feedPath = path.join(root, "electron", "update-feed.json");
 const feed = JSON.parse(fs.readFileSync(feedPath, "utf8"));
 const owner = process.env.BLIVESTATS_GH_OWNER || feed.owner;
@@ -52,8 +55,6 @@ try {
   });
 }
 
-const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
-const version = pkg.version;
 const tag = `v${version}`;
 const setupName = "B-LiveStats-Handball-Setup.exe";
 const setupPath = path.join(outDir, setupName);
@@ -129,7 +130,7 @@ if (skipBuild) {
     "electron-builder",
     "--win",
     "nsis",
-    `--config.directories.output=release-publish`,
+    `--config.directories.output=${outDirName}`,
     "--publish",
     "never",
   ];
