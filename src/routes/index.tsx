@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import splashAsset from "@/assets/livestats-splash.png";
+import { useGameStore } from "@/lib/gameStore";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -15,11 +16,33 @@ export const Route = createFileRoute("/")({
 function Splash() {
   const nav = useNavigate();
   const [leaving, setLeaving] = useState(false);
+  const leavingRef = useRef(false);
+
+  const leaveTo = (to: "/home" | "/game") => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    setLeaving(true);
+    setTimeout(() => nav({ to }), 450);
+  };
+
+  useEffect(() => {
+    const persistApi = useGameStore.persist;
+    const resumeIfLive = () => {
+      if (useGameStore.getState().setupComplete) leaveTo("/game");
+    };
+    if (persistApi.hasHydrated()) {
+      resumeIfLive();
+      return;
+    }
+    return persistApi.onFinishHydration(resumeIfLive);
+  }, [nav]);
 
   const enter = () => {
-    if (leaving) return;
-    setLeaving(true);
-    setTimeout(() => nav({ to: "/home" }), 450);
+    if (useGameStore.persist.hasHydrated() && useGameStore.getState().setupComplete) {
+      leaveTo("/game");
+      return;
+    }
+    leaveTo("/home");
   };
 
   return (

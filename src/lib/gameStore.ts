@@ -792,6 +792,7 @@ export const useGameStore = create<State>()(
           ...current,
           ...p,
           clockCountUp: true,
+          clockRunning: false,
           clockOriginMs: null,
           clockOriginSec: typeof p.clockSec === "number" ? p.clockSec : 0,
           halfDirections: p.halfDirections ?? { 1: team1Direction, [half]: team1Direction },

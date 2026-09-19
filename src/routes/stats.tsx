@@ -393,8 +393,16 @@ function StatsPage() {
                 </div>
 
                 {/* One team table per page */}
-                <div className="mt-4 print:break-inside-avoid">
-                  <TeamTable name={t.name || `Team ${tn}`} color={t.color} team={t} stats={s} log={log} teamN={tn} />
+                <div className="mt-4 print:break-inside-avoid space-y-4">
+                  <TeamTable
+                    name={t.name || `Team ${tn}`}
+                    color={t.color}
+                    team={t}
+                    stats={s}
+                    log={log}
+                    teamN={tn}
+                    gks={tn === 1 ? gk1 : gk2}
+                  />
                 </div>
               </div>
             </div>
@@ -1169,7 +1177,23 @@ function fmtPct(g: number, a: number) { return a ? `${Math.round((g / a) * 100)}
 
 
 
-function TeamTable({ name, color, team, stats, log, teamN }: { name: string; color: string; team: TeamSetup; stats: ReturnType<typeof buildBoxScore>; log: LogEntry[]; teamN: 1 | 2 }) {
+function TeamTable({
+  name,
+  color,
+  team,
+  stats,
+  log,
+  teamN,
+  gks,
+}: {
+  name: string;
+  color: string;
+  team: TeamSetup;
+  stats: ReturnType<typeof buildBoxScore>;
+  log: LogEntry[];
+  teamN: 1 | 2;
+  gks: ReturnType<typeof buildGoalkeeperStats>;
+}) {
   // Per-player zone aggregates (uses court coordinates classification)
   const perPlayer = new Map<string, Record<Zone, ZoneCount>>();
   const ensure = (pn: string) => {
@@ -1277,6 +1301,7 @@ function TeamTable({ name, color, team, stats, log, teamN }: { name: string; col
   const HEADERS = ["No","Name","Pos","Goals","M/A","%","6m","9m","Wing","FB","BT","EG","7m M/A","7m %","AS","R7m","TO","ST","BS","P7m","RF","DF","OF","TOT","2m","YC","RC","BC"];
 
   return (
+    <div className="space-y-3">
     <div className="bg-white border overflow-x-auto">
       <div className="px-3 py-2 text-white font-bold uppercase tracking-wider text-sm" style={{ background: color }}>{name}</div>
       <table className="w-full text-[11px] border-collapse">
@@ -1365,6 +1390,8 @@ function TeamTable({ name, color, team, stats, log, teamN }: { name: string; col
           </tr>
         </tbody>
       </table>
+    </div>
+    <GKPanel name={name} color={color} gks={gks} />
     </div>
   );
 }
