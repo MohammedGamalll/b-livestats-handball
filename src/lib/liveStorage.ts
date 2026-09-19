@@ -12,11 +12,23 @@ function persistRevOf(raw: string | null): number {
   }
 }
 
-function shouldWrite(incoming: string, existing: string | null): boolean {
+function logFingerprint(raw: string | null): string {
+  if (!raw) return "";
+  try {
+    const log = (JSON.parse(raw) as { state?: { log?: unknown } }).state?.log ?? [];
+    return JSON.stringify(log);
+  } catch {
+    return "";
+  }
+}
+
+export function shouldWrite(incoming: string, existing: string | null): boolean {
+  if (!existing) return true;
   const nextRev = persistRevOf(incoming);
   const prevRev = persistRevOf(existing);
-  if (prevRev < 0) return true;
-  return nextRev >= prevRev;
+  if (nextRev < prevRev) return false;
+  if (nextRev > prevRev) return true;
+  return logFingerprint(incoming) === logFingerprint(existing);
 }
 
 function notifyPeers() {

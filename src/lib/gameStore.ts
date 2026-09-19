@@ -175,7 +175,7 @@ let makeIdCounter = 0;
 
 const bump = (s: { persistRev?: number }, patch: Partial<State>): Partial<State> => ({
   ...patch,
-  persistRev: (s.persistRev ?? 0) + 1,
+  persistRev: Math.max(Date.now(), (s.persistRev ?? 0) + 1),
 });
 
 const blankTeam = (name: string, color: string): TeamSetup => ({
@@ -443,15 +443,13 @@ export const useGameStore = create<State>()(
         }),
 
       startClock: () =>
-        set((s) =>
-          bump(s, {
+        set((s) => ({
           clockRunning: true,
           clockOriginMs: Date.now(),
           clockOriginSec: s.clockSec,
-          }),
-        ),
+        })),
       stopClock: () =>
-        set((s) => bump(s, applyClockTo(s, wallElapsedSec(s), false))),
+        set((s) => applyClockTo(s, wallElapsedSec(s), false)),
       tick: () =>
         set((s) => {
           if (!s.clockRunning) return {};
@@ -799,18 +797,30 @@ export const useGameStore = create<State>()(
       storage: createJSONStorage(() => createLiveStateStorage()),
       merge: (persisted, current) => {
         const p = migrateCountdownToElapsed((persisted ?? {}) as Partial<State>);
+        const pRev = p.persistRev ?? 0;
+        const cRev = current.persistRev ?? 0;
         const team1Direction = p.team1Direction ?? current.team1Direction;
         const half = p.half ?? current.half;
-        return {
+        const next = {
           ...current,
           ...p,
           clockCountUp: true,
           clockRunning: false,
           clockOriginMs: null,
-          clockOriginSec: typeof p.clockSec === "number" ? p.clockSec : 0,
-          persistRev: p.persistRev ?? 0,
+          clockOriginSec: typeof p.clockSec === "number" ? p.clockSec : current.clockSec,
+          persistRev: Math.max(pRev, cRev),
           halfDirections: p.halfDirections ?? { 1: team1Direction, [half]: team1Direction },
         };
+        // A newer in-memory edit must not be replaced by a stale disk snapshot.
+        if (cRev > pRev) {
+          next.log = current.log;
+          next.score1 = current.score1;
+          next.score2 = current.score2;
+          next.timeouts1 = current.timeouts1;
+          next.timeouts2 = current.timeouts2;
+          next.persistRev = cRev;
+        }
+        return next;
       },
     },
   ),

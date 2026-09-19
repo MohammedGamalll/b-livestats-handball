@@ -269,6 +269,11 @@ function registerIpc() {
         const prevRev = prev?.state?.persistRev ?? 0;
         const nextRev = incoming?.state?.persistRev ?? 0;
         if (nextRev < prevRev) return { ok: false, skipped: true };
+        if (nextRev === prevRev) {
+          const prevLog = JSON.stringify(prev?.state?.log ?? []);
+          const nextLog = JSON.stringify(incoming?.state?.log ?? []);
+          if (prevLog !== nextLog) return { ok: false, skipped: true };
+        }
       } catch {
         /* overwrite unreadable files */
       }

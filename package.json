@@ -1,7 +1,7 @@
 {
   "name": "b-livestats-handball",
   "productName": "B LiveStats Handball",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "Offline handball live statistics desktop app",
   "author": "B LiveStats",
   "private": true,
