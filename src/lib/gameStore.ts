@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { createLiveStateStorage } from "./liveStorage";
 import type { ActionType } from "./handball";
 
 export interface Official { name: string; surname: string; role: string; country: string; shirtNo: string; }
@@ -119,6 +120,7 @@ interface State {
   suspensions2: number;
   activeSuspensions: Suspension[];
   log: LogEntry[];
+  persistRev: number;
   formation1: Formation;
   formation2: Formation;
   lineupTemplates: { left: Record<string, { x: number; y: number }>; right: Record<string, { x: number; y: number }> };
@@ -170,6 +172,11 @@ const makeId = (prefix: string) => {
 };
 
 let makeIdCounter = 0;
+
+const bump = (s: { persistRev?: number }, patch: Partial<State>): Partial<State> => ({
+  ...patch,
+  persistRev: (s.persistRev ?? 0) + 1,
+});
 
 const blankTeam = (name: string, color: string): TeamSetup => ({
   name,
@@ -347,6 +354,7 @@ export const useGameStore = create<State>()(
       suspensions2: 0,
       activeSuspensions: [],
       log: [],
+      persistRev: 0,
       formation1: {},
       formation2: {},
       lineupTemplates: { left: {}, right: {} },
@@ -429,19 +437,21 @@ export const useGameStore = create<State>()(
       setSetupComplete: (b) =>
         set((s) => {
           if (b && !s.setupComplete) {
-            return { setupComplete: true, clockSec: 0, clockCountUp: true };
+            return bump(s, { setupComplete: true, clockSec: 0, clockCountUp: true });
           }
-          return { setupComplete: b };
+          return bump(s, { setupComplete: b });
         }),
 
       startClock: () =>
-        set((s) => ({
+        set((s) =>
+          bump(s, {
           clockRunning: true,
           clockOriginMs: Date.now(),
           clockOriginSec: s.clockSec,
-        })),
+          }),
+        ),
       stopClock: () =>
-        set((s) => applyClockTo(s, wallElapsedSec(s), false)),
+        set((s) => bump(s, applyClockTo(s, wallElapsedSec(s), false))),
       tick: () =>
         set((s) => {
           if (!s.clockRunning) return {};
@@ -566,12 +576,12 @@ export const useGameStore = create<State>()(
             ];
           }
 
-          return { log: [entry, ...s.log], score1, score2, timeouts1, timeouts2, suspensions1, suspensions2, possession, activeSuspensions, team1, team2 };
+          return bump(s, { log: [entry, ...s.log], score1, score2, timeouts1, timeouts2, suspensions1, suspensions2, possession, activeSuspensions, team1, team2 });
         }),
       updateLogEntry: (id, patch) =>
         set((s) => {
           const log = s.log.map((e) => (e.id === id ? { ...e, ...patch } : e));
-          return { log, ...recomputeCounters(log) };
+          return bump(s, { log, ...recomputeCounters(log) });
         }),
       deleteLogEntry: (id) =>
         set((s) => {
@@ -589,7 +599,7 @@ export const useGameStore = create<State>()(
             if (entry.team === 1) team1 = clearExc(team1);
             else if (entry.team === 2) team2 = clearExc(team2);
           }
-          return { log, activeSuspensions, team1, team2, ...recomputeCounters(log) };
+          return bump(s, { log, activeSuspensions, team1, team2, ...recomputeCounters(log) });
 
         }),
       undoLast: () =>
@@ -626,11 +636,12 @@ export const useGameStore = create<State>()(
             if (last.team === 1) team1 = clearExc(team1);
             else if (last.team === 2) team2 = clearExc(team2);
           }
-          return { log: rest, score1, score2, timeouts1, timeouts2, suspensions1, suspensions2, activeSuspensions, team1, team2 };
+          return bump(s, { log: rest, score1, score2, timeouts1, timeouts2, suspensions1, suspensions2, activeSuspensions, team1, team2 });
 
         }),
       reset: () =>
-        set({
+        set((s) =>
+          bump(s, {
           info: blankInfo(),
           team1: blankTeam("", "#d62828"),
           team2: blankTeam("", "#1565c0"),
@@ -656,7 +667,8 @@ export const useGameStore = create<State>()(
           formation1: {},
           formation2: {},
           shootoutRounds: [],
-        }),
+          }),
+        ),
       
       setFormationPos: (n, playerId, pos) =>
         set((s) => {
@@ -784,6 +796,7 @@ export const useGameStore = create<State>()(
     }),
     {
       name: "b-livestats",
+      storage: createJSONStorage(() => createLiveStateStorage()),
       merge: (persisted, current) => {
         const p = migrateCountdownToElapsed((persisted ?? {}) as Partial<State>);
         const team1Direction = p.team1Direction ?? current.team1Direction;
@@ -795,6 +808,7 @@ export const useGameStore = create<State>()(
           clockRunning: false,
           clockOriginMs: null,
           clockOriginSec: typeof p.clockSec === "number" ? p.clockSec : 0,
+          persistRev: p.persistRev ?? 0,
           halfDirections: p.halfDirections ?? { 1: team1Direction, [half]: team1Direction },
         };
       },

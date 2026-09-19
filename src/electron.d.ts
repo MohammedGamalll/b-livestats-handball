@@ -92,6 +92,10 @@ export type ElectronAPI = {
     updateVersion?: string;
   }>;
   installUpdate: () => Promise<{ ok: boolean }>;
+  getLiveState: (name: string) => Promise<string | null>;
+  setLiveState: (name: string, value: string) => Promise<{ ok: boolean; skipped?: boolean }>;
+  removeLiveState: (name: string) => Promise<{ ok: boolean }>;
+  onLiveStateChanged: (callback: (name?: string) => void) => () => void;
   onUpdateEvent: (callback: (payload: {
     configured: boolean;
     version: string;

@@ -123,7 +123,7 @@ function startStaticServer(root) {
       }
     });
     server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => resolve(server));
+    server.listen(18765, "127.0.0.1", () => resolve(server));
   });
 }
 
@@ -143,6 +143,11 @@ function removeSidecars(dbPath) {
   for (const extra of sidecarPaths(dbPath)) {
     if (exists(extra)) fs.unlinkSync(extra);
   }
+}
+
+function liveStatePath(name) {
+  const safe = String(name || "b-livestats").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return path.join(app.getPath("userData"), `${safe}.json`);
 }
 
 function backupDateStamp() {
@@ -244,6 +249,44 @@ function registerIpc() {
   ipcMain.handle("db:markOnboardingComplete", () => dbApi.markOnboardingComplete());
   ipcMain.handle("export-backup", (event) => exportBackup(event));
   ipcMain.handle("import-backup", (event) => importBackup(event));
+  ipcMain.handle("live:get", (_event, name) => {
+    const file = liveStatePath(name);
+    if (!exists(file)) return null;
+    try {
+      return fs.readFileSync(file, "utf8");
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.handle("live:set", (event, payload) => {
+    const name = payload?.name || "b-livestats";
+    const value = typeof payload?.value === "string" ? payload.value : "";
+    const file = liveStatePath(name);
+    if (exists(file) && value) {
+      try {
+        const prev = JSON.parse(fs.readFileSync(file, "utf8"));
+        const incoming = JSON.parse(value);
+        const prevRev = prev?.state?.persistRev ?? 0;
+        const nextRev = incoming?.state?.persistRev ?? 0;
+        if (nextRev < prevRev) return { ok: false, skipped: true };
+      } catch {
+        /* overwrite unreadable files */
+      }
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, value, "utf8");
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.webContents.id !== event.sender.id) {
+        win.webContents.send("live:changed", name);
+      }
+    }
+    return { ok: true };
+  });
+  ipcMain.handle("live:remove", (_event, name) => {
+    const file = liveStatePath(name);
+    if (exists(file)) fs.unlinkSync(file);
+    return { ok: true };
+  });
   registerUpdateIpc();
 }
 

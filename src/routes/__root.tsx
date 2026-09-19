@@ -18,6 +18,7 @@ import { isUnlocked } from "@/lib/gate.functions";
 import { getDatabaseStatus } from "@/lib/db.functions";
 
 const GlobalClockTicker = lazy(() => import("../components/GlobalClockTicker"));
+const LiveStoreSync = lazy(() => import("../components/LiveStoreSync"));
 
 
 function NotFoundComponent() {
@@ -153,6 +154,7 @@ function RootComponent() {
       <ClientOnly fallback={null}>
         <Suspense fallback={null}>
           <GlobalClockTicker />
+          <LiveStoreSync />
         </Suspense>
       </ClientOnly>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}

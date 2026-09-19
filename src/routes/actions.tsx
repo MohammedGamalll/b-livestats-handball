@@ -77,8 +77,14 @@ function ActionsPage() {
   const [searchText, setSearchText] = useState<string>("");
   const [pickStep, setPickStep] = useState<"court" | "goal" | null>(null);
 
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => { setHydrated(true); }, []);
+  const [hydrated, setHydrated] = useState(() => useGameStore.persist.hasHydrated());
+  useEffect(() => {
+    if (useGameStore.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
+    }
+    return useGameStore.persist.onFinishHydration(() => setHydrated(true));
+  }, []);
 
   const situationTimeline = useMemo(
     () => buildSituationTimeline(team1, team2, log, {

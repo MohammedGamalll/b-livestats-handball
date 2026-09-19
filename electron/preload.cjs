@@ -27,6 +27,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   checkForUpdates: () => ipcRenderer.invoke("update:check"),
   downloadUpdate: () => ipcRenderer.invoke("update:download"),
   installUpdate: () => ipcRenderer.invoke("update:install"),
+  getLiveState: (name) => ipcRenderer.invoke("live:get", name),
+  setLiveState: (name, value) => ipcRenderer.invoke("live:set", { name, value }),
+  removeLiveState: (name) => ipcRenderer.invoke("live:remove", name),
+  onLiveStateChanged: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("live:changed", listener);
+    return () => ipcRenderer.removeListener("live:changed", listener);
+  },
   onUpdateEvent: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("update:event", listener);
